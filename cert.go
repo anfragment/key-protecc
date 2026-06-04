@@ -43,7 +43,7 @@ func runCertTest(signer crypto.Signer) error {
 	roots.AddCert(rootCert)
 	if _, err := leafCert.Verify(x509.VerifyOptions{
 		Roots:     roots,
-		DNSName:   "localhost",
+		DNSName:   "example.net",
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}); err != nil {
 		return fmt.Errorf("verify leaf chain: %w", err)
