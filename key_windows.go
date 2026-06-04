@@ -37,7 +37,7 @@ const (
 type nCryptProvHandle uintptr
 type nCryptKeyHandle uintptr
 
-func createKey(name string) (crypto.Signer, error) {
+func createKey(name string) (signCloser, error) {
 	hProv, err := openProvider()
 	if err != nil {
 		return nil, err
