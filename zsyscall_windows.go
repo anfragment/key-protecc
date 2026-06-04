@@ -41,15 +41,24 @@ var (
 	modncrypt = windows.NewLazySystemDLL("ncrypt.dll")
 
 	procNCryptCreatePersistedKey  = modncrypt.NewProc("NCryptCreatePersistedKey")
+	procNCryptDeleteKey           = modncrypt.NewProc("NCryptDeleteKey")
 	procNCryptExportKey           = modncrypt.NewProc("NCryptExportKey")
 	procNCryptFinalizeKey         = modncrypt.NewProc("NCryptFinalizeKey")
 	procNCryptFreeObject          = modncrypt.NewProc("NCryptFreeObject")
+	procNCryptOpenKey             = modncrypt.NewProc("NCryptOpenKey")
 	procNCryptOpenStorageProvider = modncrypt.NewProc("NCryptOpenStorageProvider")
 	procNCryptSetProperty         = modncrypt.NewProc("NCryptSetProperty")
+	procNCryptSignHash            = modncrypt.NewProc("NCryptSignHash")
 )
 
 func nCryptCreatePersistedKey(hProvider nCryptProvHandle, phKey *nCryptKeyHandle, pszAlgId *uint16, pszKeyName *uint16, dwLegacyKeySpec uint32, dwFlags uint32) (ret uint32) {
 	r0, _, _ := syscall.SyscallN(procNCryptCreatePersistedKey.Addr(), uintptr(hProvider), uintptr(unsafe.Pointer(phKey)), uintptr(unsafe.Pointer(pszAlgId)), uintptr(unsafe.Pointer(pszKeyName)), uintptr(dwLegacyKeySpec), uintptr(dwFlags))
+	ret = uint32(r0)
+	return
+}
+
+func nCryptDeleteKey(hKey nCryptKeyHandle, dwFlags uint32) (ret uint32) {
+	r0, _, _ := syscall.SyscallN(procNCryptDeleteKey.Addr(), uintptr(hKey), uintptr(dwFlags))
 	ret = uint32(r0)
 	return
 }
@@ -72,6 +81,12 @@ func nCryptFreeObject(hObject uintptr) (ret uint32) {
 	return
 }
 
+func nCryptOpenKey(hProvider nCryptProvHandle, phKey *nCryptKeyHandle, pszKeyName *uint16, dwLegacyKeySpec uint32, dwFlags uint32) (ret uint32) {
+	r0, _, _ := syscall.SyscallN(procNCryptOpenKey.Addr(), uintptr(hProvider), uintptr(unsafe.Pointer(phKey)), uintptr(unsafe.Pointer(pszKeyName)), uintptr(dwLegacyKeySpec), uintptr(dwFlags))
+	ret = uint32(r0)
+	return
+}
+
 func nCryptOpenStorageProvider(phProvider *nCryptProvHandle, pszProviderName *uint16, dwFlags uint32) (ret uint32) {
 	r0, _, _ := syscall.SyscallN(procNCryptOpenStorageProvider.Addr(), uintptr(unsafe.Pointer(phProvider)), uintptr(unsafe.Pointer(pszProviderName)), uintptr(dwFlags))
 	ret = uint32(r0)
@@ -80,6 +95,12 @@ func nCryptOpenStorageProvider(phProvider *nCryptProvHandle, pszProviderName *ui
 
 func nCryptSetProperty(hObject nCryptKeyHandle, pszProperty *uint16, pbInput *byte, cbInput uint32, dwFlags uint32) (ret uint32) {
 	r0, _, _ := syscall.SyscallN(procNCryptSetProperty.Addr(), uintptr(hObject), uintptr(unsafe.Pointer(pszProperty)), uintptr(unsafe.Pointer(pbInput)), uintptr(cbInput), uintptr(dwFlags))
+	ret = uint32(r0)
+	return
+}
+
+func nCryptSignHash(hKey nCryptKeyHandle, pPaddingInfo *byte, pbHashValue *byte, cbHashValue uint32, pbSignature *byte, cbSignature uint32, pcbResult *uint32, dwFlags uint32) (ret uint32) {
+	r0, _, _ := syscall.SyscallN(procNCryptSignHash.Addr(), uintptr(hKey), uintptr(unsafe.Pointer(pPaddingInfo)), uintptr(unsafe.Pointer(pbHashValue)), uintptr(cbHashValue), uintptr(unsafe.Pointer(pbSignature)), uintptr(cbSignature), uintptr(unsafe.Pointer(pcbResult)), uintptr(dwFlags))
 	ret = uint32(r0)
 	return
 }
