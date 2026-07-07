@@ -19,6 +19,13 @@ tasks:
       - go build -tags kpsoftkey -o {{.BINARY}} .
       - ./{{.BINARY}} certtest
 
+  bench:
+    desc: Benchmark certificate signing (key create/delete excluded from timing).
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - go test -tags kpsoftkey -run '^$' -bench . -benchmem .
+
   vet:
     desc: Vet the module.
     cmds:

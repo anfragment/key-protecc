@@ -27,7 +27,12 @@ func runCertTest(signer crypto.Signer) error {
 		return fmt.Errorf("create root certificate: %w", err)
 	}
 
-	leafCert, err := createLeafCert(signer, rootCert)
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate leaf key: %w", err)
+	}
+
+	leafCert, err := createLeafCert(signer, rootCert, &leafKey.PublicKey)
 	if err != nil {
 		return fmt.Errorf("create leaf certificate: %w", err)
 	}
@@ -91,14 +96,9 @@ func createRootCert(signer crypto.Signer) (*x509.Certificate, error) {
 	return x509.ParseCertificate(der)
 }
 
-// createLeafCert builds a leaf certificate, signed by the root.
+// createLeafCert builds a leaf certificate for leafPub, signed by the root.
 // Mirrors the leaf template used in Zen's certgen.
-func createLeafCert(signer crypto.Signer, rootCert *x509.Certificate) (*x509.Certificate, error) {
-	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("generate leaf key: %w", err)
-	}
-
+func createLeafCert(signer crypto.Signer, rootCert *x509.Certificate, leafPub crypto.PublicKey) (*x509.Certificate, error) {
 	serialNumber, err := randomSerial()
 	if err != nil {
 		return nil, err
@@ -120,7 +120,7 @@ func createLeafCert(signer crypto.Signer, rootCert *x509.Certificate) (*x509.Cer
 		DNSNames:              []string{"example.net"},
 	}
 
-	der, err := x509.CreateCertificate(rand.Reader, tpl, rootCert, &leafKey.PublicKey, signer)
+	der, err := x509.CreateCertificate(rand.Reader, tpl, rootCert, leafPub, signer)
 	if err != nil {
 		return nil, fmt.Errorf("create certificate: %w", err)
 	}
