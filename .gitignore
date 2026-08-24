@@ -1,0 +1,15 @@
+# Build output.
+/key-protecc
+/key-protecc.test
+/*.app/
+
+# Local signing input. A provisioning profile is tied to one Apple Developer account,
+# allowlists a fixed app ID, and expires, so each machine supplies its own.
+/macos/*.provisionprofile
+
+# Produced when enrolling a signing certificate with Apple. Single use; the private key
+# stays in the keychain.
+*.certSigningRequest
+
+# Machine-local signing settings: team ID, app ID, profile path, signing identity.
+/macos/signing.env

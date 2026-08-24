@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Both entitlements are required to reach the data protection keychain, which is
+	     where Secure Enclave keys live. Without them SecItem calls fail with -34018
+	     errSecMissingEntitlement. keychain-access-groups is the restricted one, so the
+	     binary must be signed with a real Apple identity and carry a provisioning profile
+	     that allowlists it; ad-hoc signing is killed by AMFI at exec.
+
+	     Generating an Enclave key works without any of this. Only persisting it does not. -->
+	<key>com.apple.application-identifier</key>
+	<string>@TEAM_ID@.@BUNDLE_ID@</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>@TEAM_ID@.@BUNDLE_ID@</string>
+	</array>
+</dict>
+</plist>

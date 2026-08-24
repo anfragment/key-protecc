@@ -37,6 +37,37 @@ func BenchmarkCreateRootCert(b *testing.B) {
 	}
 }
 
+// BenchmarkCreateLeafCertParallel measures whether concurrent signing scales. Hardware
+// backends fan every operation through a single device, so throughput may be flat no matter
+// how many goroutines ask: run with -cpu=1,2,4,8,12 and compare ns/op. Flat ns/op across the
+// list means the backend serialises, and a browser opening N connections to new hosts at once
+// pays N times the single-op cost. This is the number that decides whether an in-memory
+// intermediate CA is worth the key-exposure trade.
+func BenchmarkCreateLeafCertParallel(b *testing.B) {
+	signer := newBenchSigner(b)
+
+	rootCert, err := createRootCert(signer)
+	if err != nil {
+		b.Fatalf("create root certificate: %v", err)
+	}
+
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		b.Fatalf("generate leaf key: %v", err)
+	}
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			// b.Error, not b.Fatal: Fatal calls Goexit, which would only unwind this
+			// goroutine and leave the benchmark hanging.
+			if _, err := createLeafCert(signer, rootCert, &leafKey.PublicKey); err != nil {
+				b.Errorf("create leaf certificate: %v", err)
+				return
+			}
+		}
+	})
+}
+
 func BenchmarkCreateLeafCert(b *testing.B) {
 	signer := newBenchSigner(b)
 

@@ -5,14 +5,14 @@ vars:
 
 tasks:
   build:
-    desc: Build the binary.
+    desc: Build the binary against the platform's hardware key store.
     env:
       CGO_ENABLED: "1"
     cmds:
       - go build -o {{.BINARY}} .
 
   certtest:
-    desc: Run the create/sign/verify self-test locally.
+    desc: Run the create/sign/verify self-test against a software key. No hardware involved.
     env:
       CGO_ENABLED: "1"
     cmds:
@@ -20,11 +20,38 @@ tasks:
       - ./{{.BINARY}} certtest
 
   bench:
-    desc: Benchmark certificate signing (key create/delete excluded from timing).
+    desc: Benchmark signing against a software key. See bench-enclave for hardware numbers.
     env:
       CGO_ENABLED: "1"
     cmds:
       - go test -tags kpsoftkey -run '^$' -bench . -benchmem .
+
+  bundle:
+    # Signing settings come from macos/signing.env or the environment; see macos/bundle.sh.
+    desc: Wrap the binary in a signed .app bundle (macOS).
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - go build -o {{.BINARY}} .
+      - macos/bundle.sh {{.BINARY}} {{.BINARY}}.app
+
+  certtest-enclave:
+    desc: Run the self-test against the Secure Enclave (macOS, needs a signing identity).
+    deps: [bundle]
+    cmds:
+      - ./{{.BINARY}}.app/Contents/MacOS/{{.BINARY}} certtest
+
+  bench-enclave:
+    # The Enclave path cannot run from `go test`, so the test binary is compiled, bundled and
+    # signed first. -cpu is the point of the exercise: flat ns/op across the list means the
+    # backend serialises every signature no matter how many callers there are.
+    desc: Benchmark signing against the Secure Enclave (macOS, needs a signing identity).
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - go test -c -o {{.BINARY}}.test .
+      - macos/bundle.sh {{.BINARY}}.test {{.BINARY}}-test.app
+      - ./{{.BINARY}}-test.app/Contents/MacOS/{{.BINARY}}.test -test.run '^$' -test.bench . -test.benchmem -test.cpu 1,2,4,8,12
 
   vet:
     desc: Vet the module.
@@ -34,4 +61,4 @@ tasks:
   clean:
     desc: Remove build artifacts.
     cmds:
-      - rm -f {{.BINARY}}
+      - rm -rf {{.BINARY}} {{.BINARY}}.test {{.BINARY}}.app {{.BINARY}}-test.app
