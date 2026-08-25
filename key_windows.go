@@ -2,11 +2,13 @@ package main
 
 import (
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
+	"encoding/asn1"
 	"fmt"
 	"io"
 	"math/big"
-	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -16,22 +18,15 @@ const (
 	msKeyStorageProvider     = "Microsoft Software Key Storage Provider"
 	msPlatformCryptoProvider = "Microsoft Platform Crypto Provider"
 
-	bCryptRSAAlgorithm   = "RSA"
-	bCryptRSAPublicMagic = 0x31415352
-	bCryptRSAPublicBlob  = "RSAPUBLICBLOB"
+	nCryptECDSAP256Algorithm   = "ECDSA_P256"
+	bCryptECDSAP256PublicMagic = 0x31534345 // BCRYPT_ECDSA_PUBLIC_P256_MAGIC ("ECS1")
+	bCryptECCPublicBlob        = "ECCPUBLICBLOB"
 
-	nCryptLengthProperty   = "Length"
 	nCryptKeyUsageProperty = "Key Usage"
 
 	nCryptAllowSigningFlag = 0x00000002
 
-	nCryptPadPKCS1Flag = 0x00000002
-
-	bCryptSHA256Algorithm = "SHA256"
-	bCryptSHA384Algorithm = "SHA384"
-	bCryptSHA512Algorithm = "SHA512"
-
-	rsaKeyLength = 2048
+	p256CoordinateLength = 32
 )
 
 type nCryptProvHandle uintptr
@@ -51,7 +46,7 @@ func createKey(name string) (signCloser, error) {
 		}
 	}()
 
-	algId, err := windows.UTF16PtrFromString(bCryptRSAAlgorithm)
+	algId, err := windows.UTF16PtrFromString(nCryptECDSAP256Algorithm)
 	if err != nil {
 		return nil, fmt.Errorf("convert algorithm id: %w", err)
 	}
@@ -71,16 +66,6 @@ func createKey(name string) (signCloser, error) {
 		}
 	}()
 
-	keyLen := uint32(rsaKeyLength)
-	lenProp, err := windows.UTF16PtrFromString(nCryptLengthProperty)
-	if err != nil {
-		return nil, fmt.Errorf("convert length property: %w", err)
-	}
-	ret = nCryptSetProperty(hKey, lenProp, (*byte)(unsafe.Pointer(&keyLen)), uint32(unsafe.Sizeof(keyLen)), 0)
-	if ret != 0 {
-		return nil, fmt.Errorf("set length: 0x%08x", ret)
-	}
-
 	usage := uint32(nCryptAllowSigningFlag)
 	usageProp, err := windows.UTF16PtrFromString(nCryptKeyUsageProperty)
 	if err != nil {
@@ -97,7 +82,7 @@ func createKey(name string) (signCloser, error) {
 		return nil, fmt.Errorf("finalize key: 0x%08x", ret)
 	}
 
-	pub, err := exportRSAPublicKey(hKey)
+	pub, err := exportECCPublicKey(hKey)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +120,7 @@ func loadKey(name string) (signCloser, error) {
 		}
 	}()
 
-	pub, err := exportRSAPublicKey(hKey)
+	pub, err := exportECCPublicKey(hKey)
 	if err != nil {
 		return nil, err
 	}
@@ -185,8 +170,8 @@ func openProvider() (nCryptProvHandle, error) {
 	return hProv, nil
 }
 
-func exportRSAPublicKey(hKey nCryptKeyHandle) (*rsa.PublicKey, error) {
-	blobType, err := windows.UTF16PtrFromString(bCryptRSAPublicBlob)
+func exportECCPublicKey(hKey nCryptKeyHandle) (*ecdsa.PublicKey, error) {
+	blobType, err := windows.UTF16PtrFromString(bCryptECCPublicBlob)
 	if err != nil {
 		return nil, fmt.Errorf("convert blob type: %w", err)
 	}
@@ -201,68 +186,66 @@ func exportRSAPublicKey(hKey nCryptKeyHandle) (*rsa.PublicKey, error) {
 	if ret != 0 {
 		return nil, fmt.Errorf("export key: 0x%08x", ret)
 	}
-	pub, err := parseRSAPublicBlob(buf)
+	pub, err := parseECCPublicBlob(buf)
 	if err != nil {
-		return nil, fmt.Errorf("parse RSA public blob: %w", err)
+		return nil, fmt.Errorf("parse ECC public blob: %w", err)
 	}
 	return pub, nil
-}
-
-type bCryptPKCS1PaddingInfo struct {
-	pszAlgId *uint16
 }
 
 type tpmSigner struct {
 	hProv nCryptProvHandle
 	hKey  nCryptKeyHandle
-	pub   *rsa.PublicKey
+	pub   *ecdsa.PublicKey
 }
 
 func (s *tpmSigner) Public() crypto.PublicKey {
 	return s.pub
 }
 
-// Sign implements crypto.Signer using RSA PKCS#1 v1.5.
-// RSA-PSS is intentionally unsupported - the callers of x509.CreateCertificate in Zen
-// do not specify x509 template SignatureAlgorithm, which selects v1.5.
+// Sign implements crypto.Signer using ECDSA over the TPM key. NCryptSignHash returns the
+// signature as raw r || s coordinates; it is converted to the ASN.1 DER SEQUENCE{r,s} that
+// x509.CreateCertificate expects from an ECDSA signer.
 func (s *tpmSigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
 	if _, ok := opts.(*rsa.PSSOptions); ok {
 		return nil, fmt.Errorf("tpmSigner: RSA-PSS is not supported")
 	}
 
-	var hashAlg string
 	switch opts.HashFunc() {
-	case crypto.SHA256:
-		hashAlg = bCryptSHA256Algorithm
-	case crypto.SHA384:
-		hashAlg = bCryptSHA384Algorithm
-	case crypto.SHA512:
-		hashAlg = bCryptSHA512Algorithm
+	case crypto.SHA256, crypto.SHA384, crypto.SHA512:
 	default:
 		return nil, fmt.Errorf("tpmSigner: unsupported hash %v", opts.HashFunc())
 	}
 
-	algId, err := windows.UTF16PtrFromString(hashAlg)
-	if err != nil {
-		return nil, fmt.Errorf("convert hash algorithm id: %w", err)
+	// Reject a digest whose length does not match the declared hash - a caller mistake that
+	// would otherwise have the TPM sign over wrong-sized input.
+	if len(digest) != opts.HashFunc().Size() {
+		return nil, fmt.Errorf("tpmSigner: digest length %d does not match hash %v", len(digest), opts.HashFunc())
 	}
-	padInfo := bCryptPKCS1PaddingInfo{pszAlgId: algId}
-	pPadInfo := (*byte)(unsafe.Pointer(&padInfo))
 
 	var cb uint32
-	ret := nCryptSignHash(s.hKey, pPadInfo, &digest[0], uint32(len(digest)), nil, 0, &cb, nCryptPadPKCS1Flag)
+	ret := nCryptSignHash(s.hKey, nil, &digest[0], uint32(len(digest)), nil, 0, &cb, 0)
 	if ret != 0 {
 		return nil, fmt.Errorf("sign hash (size): 0x%08x", ret)
 	}
 	sig := make([]byte, cb)
-	ret = nCryptSignHash(s.hKey, pPadInfo, &digest[0], uint32(len(digest)), &sig[0], cb, &cb, nCryptPadPKCS1Flag)
+	ret = nCryptSignHash(s.hKey, nil, &digest[0], uint32(len(digest)), &sig[0], cb, &cb, 0)
 	if ret != 0 {
 		return nil, fmt.Errorf("sign hash: 0x%08x", ret)
 	}
-	runtime.KeepAlive(padInfo)
-	runtime.KeepAlive(algId)
+	sig = sig[:cb]
 
-	return sig[:cb], nil
+	if len(sig) == 0 || len(sig)%2 != 0 {
+		return nil, fmt.Errorf("tpmSigner: unexpected raw signature length %d", len(sig))
+	}
+	half := len(sig) / 2
+	r := new(big.Int).SetBytes(sig[:half])
+	sVal := new(big.Int).SetBytes(sig[half:])
+	der, err := asn1.Marshal(struct{ R, S *big.Int }{r, sVal})
+	if err != nil {
+		return nil, fmt.Errorf("encode signature: %w", err)
+	}
+	return der, nil
 }
 
 func (s *tpmSigner) Close() error {
@@ -277,44 +260,32 @@ func (s *tpmSigner) Close() error {
 	return nil
 }
 
-// bCryptRSAKeyBlob mirrors BCRYPT_RSAKEY_BLOB.
-// See: https://learn.microsoft.com/en-us/windows/win32/api/bcrypt/ns-bcrypt-bcrypt_rsakey_blob.
-type bCryptRSAKeyBlob struct {
-	Magic       uint32
-	BitLength   uint32
-	CbPublicExp uint32
-	CbModulus   uint32
-	CbPrime1    uint32
-	CbPrime2    uint32
+// bCryptECCKeyBlob mirrors BCRYPT_ECCKEY_BLOB.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/bcrypt/ns-bcrypt-bcrypt_ecckey_blob.
+type bCryptECCKeyBlob struct {
+	Magic uint32
+	CbKey uint32
 }
 
-func parseRSAPublicBlob(blob []byte) (*rsa.PublicKey, error) {
-	const hdrLen = 24 // 6 * uint32
+func parseECCPublicBlob(blob []byte) (*ecdsa.PublicKey, error) {
+	const hdrLen = 8 // 2 * uint32
 	if len(blob) < hdrLen {
 		return nil, fmt.Errorf("blob too short: %d bytes", len(blob))
 	}
 
-	hdr := (*bCryptRSAKeyBlob)(unsafe.Pointer(&blob[0]))
-	if hdr.Magic != bCryptRSAPublicMagic {
+	hdr := (*bCryptECCKeyBlob)(unsafe.Pointer(&blob[0]))
+	if hdr.Magic != bCryptECDSAP256PublicMagic {
 		return nil, fmt.Errorf("unexpected magic: 0x%08x", hdr.Magic)
 	}
-
-	expLen := int(hdr.CbPublicExp)
-	modLen := int(hdr.CbModulus)
-	if len(blob) < hdrLen+expLen+modLen {
-		return nil, fmt.Errorf("blob truncated: need %d, have %d", hdrLen+expLen+modLen, len(blob))
+	keyLen := int(hdr.CbKey)
+	if keyLen != p256CoordinateLength {
+		return nil, fmt.Errorf("unexpected coordinate length %d for P-256", keyLen)
+	}
+	if len(blob) < hdrLen+2*keyLen {
+		return nil, fmt.Errorf("blob truncated: need %d, have %d", hdrLen+2*keyLen, len(blob))
 	}
 
-	expBytes := blob[hdrLen : hdrLen+expLen]
-	modBytes := blob[hdrLen+expLen : hdrLen+expLen+modLen]
-
-	e := new(big.Int).SetBytes(expBytes)
-	if !e.IsInt64() || e.Int64() > (1<<31-1) {
-		return nil, fmt.Errorf("public exponent too large: %s", e)
-	}
-
-	return &rsa.PublicKey{
-		N: new(big.Int).SetBytes(modBytes),
-		E: int(e.Int64()),
-	}, nil
+	x := new(big.Int).SetBytes(blob[hdrLen : hdrLen+keyLen])
+	y := new(big.Int).SetBytes(blob[hdrLen+keyLen : hdrLen+2*keyLen])
+	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
 }
