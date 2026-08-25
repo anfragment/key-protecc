@@ -235,12 +235,11 @@ func (s *tpmSigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) 
 	}
 	sig = sig[:cb]
 
-	if len(sig) == 0 || len(sig)%2 != 0 {
+	if len(sig) != 2*p256CoordinateLength {
 		return nil, fmt.Errorf("tpmSigner: unexpected raw signature length %d", len(sig))
 	}
-	half := len(sig) / 2
-	r := new(big.Int).SetBytes(sig[:half])
-	sVal := new(big.Int).SetBytes(sig[half:])
+	r := new(big.Int).SetBytes(sig[:p256CoordinateLength])
+	sVal := new(big.Int).SetBytes(sig[p256CoordinateLength:])
 	der, err := asn1.Marshal(struct{ R, S *big.Int }{r, sVal})
 	if err != nil {
 		return nil, fmt.Errorf("encode signature: %w", err)
