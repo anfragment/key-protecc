@@ -1,7 +1,9 @@
 version: "3"
 
 vars:
-  BINARY: key-protecc
+  # exeExt: Windows resolves commands through PATHEXT, so an extensionless
+  # binary is unrunnable there ("not found" from task certtest).
+  BINARY: key-protecc{{exeExt}}
 
 tasks:
   build:
