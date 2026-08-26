@@ -14,7 +14,7 @@ tasks:
       - go build -o {{.BINARY}} .
 
   certtest:
-    desc: Run the create/sign/verify self-test against a software key. No hardware involved.
+    desc: Run the create/sign/verify self-test. Software key on macOS; the platform TPM on Windows and Linux.
     env:
       CGO_ENABLED: "1"
     cmds:

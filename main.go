@@ -2,10 +2,13 @@ package main
 
 import (
 	"crypto"
+	"crypto/rand"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -83,11 +86,15 @@ func runCertTestCmd(args []string) {
 	fs := flag.NewFlagSet("certtest", flag.ExitOnError)
 	fs.Parse(args)
 
+	printReportHeader()
+
 	name := uuid.NewString()
+	start := time.Now()
 	signer, err := createKey(name)
 	if err != nil {
 		log.Fatalf("create key: %v", err)
 	}
+	createDuration := time.Since(start)
 
 	defer func() {
 		signer.Close()
@@ -96,11 +103,30 @@ func runCertTestCmd(args []string) {
 		}
 	}()
 
-	log.Printf("created throwaway key %q", name)
+	fmt.Printf("  %-8s %s\n\n", "key:", keyDescription(signer.Public()))
+	fmt.Printf("  create key: %s\n", fmtDuration(createDuration))
 
+	start = time.Now()
 	if err := runCertTest(signer); err != nil {
 		log.Fatalf("certtest: %v", err)
 	}
+	fmt.Printf("  certtest:   %s (root + leaf signed, chain verified)\n", fmtDuration(time.Since(start)))
 
-	log.Print("certtest: root and leaf certificates verified successfully")
+	// Direct signatures over a fixed digest measure the hardware's per-operation latency -
+	// the number that decides whether the root can sign leaves itself or needs an
+	// intermediate.
+	const signOps = 20
+	digest := sha256.Sum256([]byte("key-protecc certtest"))
+	durations := make([]time.Duration, 0, signOps)
+	for range signOps {
+		start := time.Now()
+		if _, err := signer.Sign(rand.Reader, digest[:], crypto.SHA256); err != nil {
+			log.Fatalf("sign loop: %v", err)
+		}
+		durations = append(durations, time.Since(start))
+	}
+	median, min, max := durationStats(durations)
+	fmt.Printf("  sign x%d:   median %s  min %s  max %s\n", signOps, fmtDuration(median), fmtDuration(min), fmtDuration(max))
+
+	fmt.Println("\nOK: root and leaf certificates verified successfully")
 }

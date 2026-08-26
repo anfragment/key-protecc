@@ -14,6 +14,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const backendName = "TPM (Microsoft Platform Crypto Provider)"
+
 const (
 	msKeyStorageProvider     = "Microsoft Software Key Storage Provider"
 	msPlatformCryptoProvider = "Microsoft Platform Crypto Provider"

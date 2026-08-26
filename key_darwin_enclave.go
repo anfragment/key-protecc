@@ -6,3 +6,5 @@ package main
 
 // #cgo CFLAGS: -DKP_SECURE_ENCLAVE
 import "C"
+
+const backendName = "Secure Enclave"

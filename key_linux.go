@@ -38,6 +38,8 @@ import (
 // the owner authorization makes existing blobs unloadable, the same property as any
 // TPM-protected key. The owner authorization is assumed empty (the common default).
 
+const backendName = "TPM 2.0 (go-tpm)"
+
 // defaultTPMDevice is the Linux kernel TPM resource-manager device. The resource manager
 // (unlike /dev/tpm0) virtualizes transient-object slots and flushes handles when the file
 // descriptor closes, so a crash cannot leak TPM memory. Override with KP_TPM_DEVICE.
